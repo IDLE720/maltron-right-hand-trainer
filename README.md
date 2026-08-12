@@ -17,7 +17,7 @@ Double-click **Start Key Overlay.bat**. The overlay:
 - creates a synchronized, always-on-top overlay on every connected display;
 - observes keys system-wide without blocking them;
 - highlights Maltron letter and Space keys;
-- shows a recent, in-memory preview of what you type above the layout;
+- shows a recent, in-memory preview above the layout and clears it after one minute without typing;
 - displays other keys in the live readout;
 - lets each display's overlay be dragged or minimized independently;
 - closes all overlays with **×**; and

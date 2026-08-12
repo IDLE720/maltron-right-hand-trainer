@@ -193,6 +193,7 @@ class OverlayApp:
         self.root = tk.Tk(); self.root.withdraw()
         self.events: queue.Queue[tuple[str, bool]] = queue.Queue()
         self.history, self.typed_text, self.held = [], "", set()
+        self.clear_text_job = None
         self.caps_lock = bool(user32.GetKeyState(20) & 1)
         self.hook, self.windows = None, []
         settings = self.load_settings(); saved_windows = settings.get("windows", [])
@@ -227,6 +228,19 @@ class OverlayApp:
         if 65 <= vk <= 90 or 48 <= vk <= 57: return chr(vk)
         return VK_NAMES.get(vk, f"VK {vk}")
 
+    def clear_typed_text(self):
+        self.typed_text = ""
+        self.clear_text_job = None
+        for window in self.windows:
+            window.typed_preview.config(state="normal")
+            window.typed_preview.delete("1.0", "end")
+            window.typed_preview.config(state="disabled")
+
+    def schedule_text_clear(self):
+        if self.clear_text_job is not None:
+            self.root.after_cancel(self.clear_text_job)
+        self.clear_text_job = self.root.after(60_000, self.clear_typed_text)
+
     def update_typed_text(self, label):
         """Build a short, in-memory typing preview; nothing is written to disk."""
         if label == "BACKSPACE": self.typed_text = self.typed_text[:-1]
@@ -250,6 +264,7 @@ class OverlayApp:
                     if label == "CAPS" and label not in self.held: self.caps_lock = not self.caps_lock
                     if label in ("SHIFT", "CTRL", "ALT", "CAPS"): self.held.add(label)
                     self.update_typed_text(label)
+                    self.schedule_text_clear()
                     if not self.history or self.history[-1] != label:
                         self.history.append(label); self.history = self.history[-6:]
                 elif label in ("SHIFT", "CTRL", "ALT", "CAPS"):
