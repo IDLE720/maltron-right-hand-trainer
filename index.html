@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A game-based trainer for the Maltron single right-hand keyboard layout.">
+  <title>Right Hand Quest — Maltron typing trainer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip" href="#game">Skip to game</a>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Right Hand Quest home"><span class="brand-mark">RH</span><span>RIGHT HAND <b>QUEST</b></span></a>
+    <div class="top-actions">
+      <div class="sound-status"><span class="pulse-dot"></span> Training ready</div>
+      <button class="icon-button" id="keyMonitorBtn" aria-label="Toggle floating key monitor" aria-pressed="true">⌨</button>
+      <button class="icon-button" id="soundBtn" aria-label="Toggle sound" aria-pressed="true">♪</button>
+      <button class="avatar" id="resetBtn" aria-label="Reset saved progress">R</button>
+    </div>
+  </header>
+
+  <main id="game">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">MALTRON · SINGLE RIGHT HAND</p>
+        <h1>Build speed.<br><em>One key at a time.</em></h1>
+        <p class="lede">Short, focused missions turn the original training sequence into a game. Accuracy comes first; speed follows.</p>
+      </div>
+      <div class="level-card" aria-label="Current level progress">
+        <div class="level-orbit"><span id="levelNumber">1</span></div>
+        <div><small>CURRENT RANK</small><strong id="rankName">Home Scout</strong><div class="xp-track"><i id="xpBar"></i></div><span id="xpLabel">0 / 300 XP</span></div>
+      </div>
+    </section>
+
+    <section class="dashboard">
+      <nav class="missions" aria-label="Training missions">
+        <div class="panel-head"><div><p class="eyebrow">YOUR PATH</p><h2>Missions</h2></div><span id="missionCount">1 / 8</span></div>
+        <div id="missionList"></div>
+        <button class="text-button" id="guideBtn">⌨ View keyboard map</button>
+      </nav>
+
+      <section class="play-panel" aria-labelledby="missionTitle">
+        <div class="play-top">
+          <div><p class="eyebrow" id="missionLabel">MISSION 01</p><h2 id="missionTitle">Find Your Home</h2><p id="missionDesc">Anchor your fingers on A · T · E · H.</p></div>
+          <div class="timer" aria-label="Elapsed time"><span>◷</span><b id="timer">0:00</b></div>
+        </div>
+
+        <div class="stats" aria-label="Current statistics">
+          <div><span>WPM</span><b id="wpm">0</b></div><div><span>ACCURACY</span><b id="accuracy">100%</b></div><div><span>STREAK</span><b id="streak">0</b></div><div><span>SCORE</span><b id="score">0</b></div>
+        </div>
+
+        <div class="prompt-wrap">
+          <div class="prompt-label"><span>TYPE THE SEQUENCE</span><span id="roundLabel">ROUND 1 / 3</span></div>
+          <div id="prompt" class="prompt" aria-live="polite"></div>
+          <label class="sr-only" for="typeInput">Type the displayed sequence</label>
+          <textarea id="typeInput" rows="1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" aria-describedby="typeHint"></textarea>
+          <div class="input-line"></div>
+          <p id="typeHint" class="hint"><kbd>Start typing</kbd> · Mistakes are counted without stopping your flow.</p>
+        </div>
+
+        <div class="keyboard-area">
+          <div class="keyboard-note"><span class="status-dot"></span><span id="nextHint">Next key: <b>T</b> · middle finger</span></div>
+          <div class="keyboard" id="keyboard" aria-label="Visual Maltron right-hand keyboard guide"></div>
+          <button id="focusBtn" class="focus-button">Focus typing area</button>
+        </div>
+      </section>
+
+      <aside class="side-panel">
+        <section class="challenge-card">
+          <div class="card-icon">⚡</div><p class="eyebrow">DAILY CHALLENGE</p><h3>Clean run</h3><p>Finish one round with at least 95% accuracy.</p><div class="reward"><span>REWARD</span><b>+150 XP</b></div>
+        </section>
+        <section class="tip-card"><p class="eyebrow">FORM CHECK</p><h3>Four right angles</h3><p>Keep your elbow, hip, knee, and ankle near 90°. Relax your arm whenever it feels tired.</p><button id="breakBtn">I need a 30-sec break</button></section>
+        <section class="best-card"><span>PERSONAL BEST</span><b id="bestWpm">—</b><small>WPM</small></section>
+      </aside>
+    </section>
+  </main>
+
+  <dialog id="keyboardDialog">
+    <button class="dialog-close" aria-label="Close keyboard map">×</button>
+    <p class="eyebrow">REFERENCE</p><h2>Right-hand letter map</h2>
+    <p>Home position: index on <b>A</b>, middle on <b>T</b>, ring on <b>E</b>, little finger on <b>H</b>, and thumb on Space.</p>
+    <div class="map-legend"><span class="f1">Index</span><span class="f2">Middle</span><span class="f3">Ring</span><span class="f4">Little</span><span class="f5">Thumb</span></div>
+    <div id="dialogKeyboard" class="keyboard large"></div>
+    <p class="source-note">Layout reference and training progression adapted from PCD Maltron's public Single Right Hand training. This independent prototype is not affiliated with PCD Maltron.</p>
+  </dialog>
+
+  <dialog id="resultDialog">
+    <div class="result-burst">★</div><p class="eyebrow">MISSION COMPLETE</p><h2 id="resultTitle">Great work!</h2><p id="resultMessage"></p><div class="result-stats"><div><b id="resultWpm">0</b><span>WPM</span></div><div><b id="resultAccuracy">0%</b><span>ACCURACY</span></div><div><b id="resultXp">+0</b><span>XP</span></div></div><button id="nextMissionBtn" class="primary-button">Continue</button>
+  </dialog>
+
+  <aside id="keyMonitor" class="key-monitor" aria-label="Floating live keyboard monitor">
+    <div id="monitorHandle" class="monitor-head">
+      <div><span class="monitor-live"></span><b>LIVE KEYS</b><small>Drag to move</small></div>
+      <button id="minimizeMonitor" aria-label="Minimize key monitor" aria-expanded="true">−</button>
+    </div>
+    <div id="monitorBody" class="monitor-body">
+      <div class="key-readout"><span>YOU PRESSED</span><strong id="pressedKey" aria-live="polite">—</strong><small id="keyHistory">Waiting for a key…</small></div>
+      <div id="monitorKeyboard" class="keyboard monitor-keyboard"></div>
+      <p>Remains visible while you scroll in the trainer.</p>
+    </div>
+  </aside>
+
+  <div id="breakOverlay" class="break-overlay" hidden><div><span>☕</span><h2>Let your hand reset</h2><p>Drop your arm gently to your side and relax from shoulder to fingertips.</p><b id="breakTimer">0:30</b><button id="skipBreak">End break early</button></div></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
