@@ -18,6 +18,8 @@ echo Building RightHandQuestOverlay.exe...
   --clean ^
   --onefile ^
   --windowed ^
+  --icon "assets\right-hand-quest.ico" ^
+  --add-data "assets\right-hand-quest.png;assets" ^
   --name RightHandQuestOverlay ^
   key-overlay.py
 if errorlevel 1 goto :failed

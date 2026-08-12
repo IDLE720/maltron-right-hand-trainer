@@ -9,6 +9,7 @@ import ctypes
 import json
 import os
 import queue
+import sys
 import tkinter as tk
 from ctypes import wintypes
 from pathlib import Path
@@ -24,12 +25,21 @@ COLORS = {
 }
 FINGERS = ["index", "index", "middle", "ring", "little", "little"]
 
+
+def resource_path(name):
+    """Find bundled assets both from source and inside a PyInstaller EXE."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / "assets" / name
+
+
 user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
 WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP = 13, 0x100, 0x101, 0x104, 0x105
 VK_NAMES = {8:"BACKSPACE", 9:"TAB", 13:"ENTER", 16:"SHIFT", 17:"CTRL", 18:"ALT", 20:"CAPS", 27:"ESC", 32:"SPACE",
             33:"PG UP", 34:"PG DN", 35:"END", 36:"HOME", 37:"←", 38:"↑", 39:"→", 40:"↓", 45:"INSERT", 46:"DELETE",
             188:",", 190:"."}
 for n in range(1, 13): VK_NAMES[111+n] = f"F{n}"
+
+GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = -20, 0x00000080, 0x00040000
 
 class KBDLLHOOKSTRUCT(ctypes.Structure):
     _fields_ = [("vkCode", wintypes.DWORD), ("scanCode", wintypes.DWORD), ("flags", wintypes.DWORD),
@@ -72,8 +82,14 @@ class LiveWindow:
         self.keys, self.drag_xy, self.minimized = {}, None, False
         self.root.title(f"Right Hand Quest — Live Keys {index + 1}")
         self.root.configure(bg=COLORS["bg"]); self.root.attributes("-topmost", True)
+        self.app.apply_icon(self.root)
         self.root.overrideredirect(True); self.root.resizable(False, False)
         self.build(); self.place(saved or {})
+        # Only the first overlay owns a taskbar button. Clicking it restores
+        # and raises every display's overlay.
+        self.root.after(150, self.configure_taskbar_style)
+        if self.index == 0:
+            self.root.bind("<FocusIn>", lambda _event: self.app.restore_all())
 
     def build(self):
         self.header = tk.Frame(self.root, bg=COLORS["bg"], height=42, cursor="fleur",
@@ -134,6 +150,21 @@ class LiveWindow:
         tk.Label(self.body, text="One synchronized overlay on every display",
                  fg=COLORS["muted"], bg=COLORS["panel"], font=("Consolas", 7)).pack(pady=(8, 0))
 
+    def configure_taskbar_style(self):
+        try:
+            hwnd = self.root.winfo_id()
+            parent = user32.GetParent(hwnd)
+            if parent: hwnd = parent
+            style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if self.index == 0:
+                style = (style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+            else:
+                style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+            self.root.withdraw(); self.root.after(20, self.root.deiconify)
+        except Exception:
+            pass
+
     def header_button(self, text, command):
         b = tk.Button(self.header, text=text, command=command, fg=COLORS["text"], bg=COLORS["bg"],
                       activebackground=COLORS["edge"], activeforeground="white", bd=0, width=3,
@@ -190,7 +221,12 @@ class OverlayApp:
     def __init__(self):
         try: user32.SetProcessDPIAware()
         except Exception: pass
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("RightHandQuest.LiveKeys")
+        except Exception: pass
         self.root = tk.Tk(); self.root.withdraw()
+        self.icon_image = None
+        self.apply_icon(self.root)
         self.events: queue.Queue[tuple[str, bool]] = queue.Queue()
         self.history, self.typed_text, self.held = [], "", set()
         self.clear_text_job = None
@@ -202,6 +238,23 @@ class OverlayApp:
             saved = saved_windows[i] if i < len(saved_windows) else {}
             self.windows.append(LiveWindow(self, window, monitor, i, saved))
         self.install_hook(); self.root.after(15, self.drain_events)
+
+    def apply_icon(self, window):
+        try:
+            if self.icon_image is None:
+                self.icon_image = tk.PhotoImage(file=str(resource_path("right-hand-quest.png")))
+            window.iconphoto(True, self.icon_image)
+        except Exception:
+            pass
+
+    def restore_all(self):
+        """Bring every overlay back when the taskbar button is selected."""
+        for window in self.windows:
+            window.root.deiconify()
+            window.root.attributes("-topmost", True)
+            window.root.lift()
+        if self.windows:
+            self.windows[0].root.after(250, lambda: self.windows[0].root.attributes("-topmost", True))
 
     @staticmethod
     def load_settings():
