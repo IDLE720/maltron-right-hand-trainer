@@ -111,10 +111,13 @@ class LiveWindow:
         typed_panel.pack(fill="x", pady=(0, 10))
         tk.Label(typed_panel, text="TYPED TEXT", fg=COLORS["muted"], bg=COLORS["bg"],
                  font=("Consolas", 7)).pack(anchor="w")
-        self.typed_label = tk.Label(typed_panel, text="Your typing will appear here…",
-                                    fg=COLORS["text"], bg=COLORS["bg"], font=("Consolas", 10),
-                                    justify="left", anchor="nw", width=62, height=3, wraplength=540)
-        self.typed_label.pack(fill="x", anchor="w")
+        self.typed_preview = tk.Text(typed_panel, fg=COLORS["text"], bg=COLORS["bg"],
+                                     insertbackground=COLORS["lime"], font=("Consolas", 10),
+                                     width=62, height=3, wrap="word", bd=0, padx=0, pady=0,
+                                     takefocus=False, cursor="arrow")
+        self.typed_preview.insert("1.0", "Your typing will appear here…")
+        self.typed_preview.config(state="disabled")
+        self.typed_preview.pack(fill="x", anchor="w")
 
         board = tk.Frame(self.body, bg=COLORS["panel"]); board.pack()
         thumb_board = tk.Frame(board, bg=COLORS["panel"]); thumb_board.grid(row=0, column=0, sticky="se", padx=(0, 4))
@@ -159,7 +162,11 @@ class LiveWindow:
     def show_key(self, label, down, history, typed_text):
         if down:
             self.current.config(text=label); self.history_label.config(text=" · ".join(history))
-            self.typed_label.config(text=typed_text or "Your typing will appear here…")
+            self.typed_preview.config(state="normal")
+            self.typed_preview.delete("1.0", "end")
+            self.typed_preview.insert("1.0", typed_text or "Your typing will appear here…")
+            self.typed_preview.see("end")
+            self.typed_preview.config(state="disabled")
         key = self.keys.get(label)
         if key:
             resting = "#365746" if label in HOME or label == "SPACE" else COLORS["key"]
@@ -232,8 +239,8 @@ class OverlayApp:
                 upper = ("SHIFT" in self.held) ^ self.caps_lock
                 self.typed_text += label.upper() if upper else label.lower()
             else: self.typed_text += label
-        # Keep the preview responsive and private by retaining only recent text.
-        self.typed_text = self.typed_text[-240:]
+        # Keep enough context while ensuring the newest text remains visible.
+        self.typed_text = self.typed_text[-2000:]
 
     def drain_events(self):
         try:
