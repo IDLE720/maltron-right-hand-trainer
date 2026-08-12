@@ -106,6 +106,16 @@ class LiveWindow:
                                 font=("Segoe UI", 19, "bold"), width=10, anchor="e")
         self.current.pack(side="right")
 
+        typed_panel = tk.Frame(self.body, bg=COLORS["bg"], padx=9, pady=7,
+                               highlightbackground=COLORS["edge"], highlightthickness=1)
+        typed_panel.pack(fill="x", pady=(0, 10))
+        tk.Label(typed_panel, text="TYPED TEXT", fg=COLORS["muted"], bg=COLORS["bg"],
+                 font=("Consolas", 7)).pack(anchor="w")
+        self.typed_label = tk.Label(typed_panel, text="Your typing will appear here…",
+                                    fg=COLORS["text"], bg=COLORS["bg"], font=("Consolas", 10),
+                                    justify="left", anchor="nw", width=62, height=3, wraplength=540)
+        self.typed_label.pack(fill="x", anchor="w")
+
         board = tk.Frame(self.body, bg=COLORS["panel"]); board.pack()
         thumb_board = tk.Frame(board, bg=COLORS["panel"]); thumb_board.grid(row=0, column=0, sticky="se", padx=(0, 4))
         letter_board = tk.Frame(board, bg=COLORS["panel"]); letter_board.grid(row=0, column=1, sticky="n")
@@ -146,9 +156,10 @@ class LiveWindow:
         self.root.geometry(f"{x:+d}{y:+d}")
         if saved.get("minimized"): self.toggle_minimize(save=False)
 
-    def show_key(self, label, down, history):
+    def show_key(self, label, down, history, typed_text):
         if down:
             self.current.config(text=label); self.history_label.config(text=" · ".join(history))
+            self.typed_label.config(text=typed_text or "Your typing will appear here…")
         key = self.keys.get(label)
         if key:
             resting = "#365746" if label in HOME or label == "SPACE" else COLORS["key"]
@@ -174,7 +185,9 @@ class OverlayApp:
         except Exception: pass
         self.root = tk.Tk(); self.root.withdraw()
         self.events: queue.Queue[tuple[str, bool]] = queue.Queue()
-        self.history, self.hook, self.windows = [], None, []
+        self.history, self.typed_text, self.held = [], "", set()
+        self.caps_lock = bool(user32.GetKeyState(20) & 1)
+        self.hook, self.windows = None, []
         settings = self.load_settings(); saved_windows = settings.get("windows", [])
         for i, monitor in enumerate(displays()):
             window = tk.Toplevel(self.root)
@@ -207,13 +220,35 @@ class OverlayApp:
         if 65 <= vk <= 90 or 48 <= vk <= 57: return chr(vk)
         return VK_NAMES.get(vk, f"VK {vk}")
 
+    def update_typed_text(self, label):
+        """Build a short, in-memory typing preview; nothing is written to disk."""
+        if label == "BACKSPACE": self.typed_text = self.typed_text[:-1]
+        elif label == "ENTER": self.typed_text += "\n"
+        elif label == "SPACE": self.typed_text += " "
+        elif label == "TAB": self.typed_text += "    "
+        elif label in (",", "."): self.typed_text += label
+        elif len(label) == 1 and label.isalnum() and not ({"CTRL", "ALT"} & self.held):
+            if label.isalpha():
+                upper = ("SHIFT" in self.held) ^ self.caps_lock
+                self.typed_text += label.upper() if upper else label.lower()
+            else: self.typed_text += label
+        # Keep the preview responsive and private by retaining only recent text.
+        self.typed_text = self.typed_text[-240:]
+
     def drain_events(self):
         try:
             while True:
                 label, down = self.events.get_nowait()
-                if down and (not self.history or self.history[-1] != label):
-                    self.history.append(label); self.history = self.history[-6:]
-                for window in self.windows: window.show_key(label, down, self.history)
+                if down:
+                    if label == "CAPS" and label not in self.held: self.caps_lock = not self.caps_lock
+                    if label in ("SHIFT", "CTRL", "ALT", "CAPS"): self.held.add(label)
+                    self.update_typed_text(label)
+                    if not self.history or self.history[-1] != label:
+                        self.history.append(label); self.history = self.history[-6:]
+                elif label in ("SHIFT", "CTRL", "ALT", "CAPS"):
+                    self.held.discard(label)
+                for window in self.windows:
+                    window.show_key(label, down, self.history, self.typed_text)
         except queue.Empty: pass
         self.root.after(15, self.drain_events)
 
