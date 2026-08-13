@@ -49,6 +49,16 @@ class MONITORINFO(ctypes.Structure):
     _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
                 ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
 
+class POINT(ctypes.Structure):
+    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
+class GUITHREADINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
+                ("hwndActive", wintypes.HWND), ("hwndFocus", wintypes.HWND),
+                ("hwndCapture", wintypes.HWND), ("hwndMenuOwner", wintypes.HWND),
+                ("hwndMoveSize", wintypes.HWND), ("hwndCaret", wintypes.HWND),
+                ("rcCaret", wintypes.RECT)]
+
 LRESULT, HHOOK = ctypes.c_ssize_t, wintypes.HANDLE
 HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 MONITORENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
@@ -59,13 +69,25 @@ user32.CallNextHookEx.argtypes = (HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes
 user32.CallNextHookEx.restype = LRESULT
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,); user32.UnhookWindowsHookEx.restype = wintypes.BOOL
 user32.GetMonitorInfoW.argtypes = (wintypes.HMONITOR, ctypes.POINTER(MONITORINFO))
+user32.GetGUIThreadInfo.argtypes = (wintypes.DWORD, ctypes.POINTER(GUITHREADINFO))
+user32.GetGUIThreadInfo.restype = wintypes.BOOL
+user32.ClientToScreen.argtypes = (wintypes.HWND, ctypes.POINTER(POINT))
+user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
+user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
+user32.GetAsyncKeyState.restype = ctypes.c_short
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetParent.argtypes = (wintypes.HWND,); user32.GetParent.restype = wintypes.HWND
+user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, wintypes.UINT)
+user32.SetWindowPos.restype = wintypes.BOOL
 kernel32.GetModuleHandleW.argtypes = (wintypes.LPCWSTR,); kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
 kernel32.CreateMutexW.restype = wintypes.HANDLE
 kernel32.GetLastError.restype = wintypes.DWORD
 kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
 ERROR_ALREADY_EXISTS, SW_RESTORE, HWND_TOPMOST = 183, 9, -1
-SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW = 0x0002, 0x0001, 0x0040
+SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0002, 0x0001, 0x0010, 0x0040
 ENUMWINDOWSPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
@@ -110,6 +132,8 @@ class LiveWindow:
                  bg=COLORS["bg"], font=("Consolas", 7)).pack(side="left")
         self.header_button("×", self.app.close)
         self.min_btn = self.header_button("−", self.toggle_minimize)
+        self.follow_btn = self.header_button("⌖", self.app.toggle_follow)
+        self.update_follow_button()
         for widget in (self.header, live):
             widget.bind("<ButtonPress-1>", self.drag_start)
             widget.bind("<B1-Motion>", self.drag_move)
@@ -156,6 +180,32 @@ class LiveWindow:
         self.make_key(thumb_board, ",", 5, 1, "thumb"); self.make_key(thumb_board, ".", 5, 2, "thumb")
         tk.Label(self.body, text="One synchronized overlay on every display",
                  fg=COLORS["muted"], bg=COLORS["panel"], font=("Consolas", 7)).pack(pady=(8, 0))
+
+    def update_follow_button(self):
+        active = self.app.auto_follow
+        self.follow_btn.config(fg=COLORS["lime"] if active else COLORS["muted"],
+                               text="⌖" if active else "○")
+
+    def snap_near(self, x, y):
+        """Restore and place this overlay near, but not over, the active caret."""
+        self.root.update_idletasks()
+        w, h = self.root.winfo_width(), self.root.winfo_height()
+        l, t, r, b = self.monitor
+        margin, gap = 12, 24
+        target_x = x + gap
+        if target_x + w > r - margin: target_x = x - w - gap
+        target_x = max(l + margin, min(target_x, r - w - margin))
+        target_y = y + gap
+        if target_y + h > b - margin: target_y = y - h - gap
+        target_y = max(t + margin, min(target_y, b - h - margin))
+        self.root.geometry(f"{target_x:+d}{target_y:+d}")
+        self.root.update_idletasks()
+        # Reposition without taking keyboard focus away from the text field.
+        hwnd = self.root.winfo_id()
+        parent = user32.GetParent(hwnd)
+        if parent: hwnd = parent
+        user32.SetWindowPos(hwnd, HWND_TOPMOST, target_x, target_y, w, h,
+                            SWP_NOACTIVATE | SWP_SHOWWINDOW)
 
     def configure_taskbar_style(self):
         try:
@@ -221,7 +271,11 @@ class LiveWindow:
     def drag_start(self, event): self.drag_xy = (event.x_root-self.root.winfo_x(), event.y_root-self.root.winfo_y())
     def drag_move(self, event):
         if self.drag_xy: self.root.geometry(f"{event.x_root-self.drag_xy[0]:+d}{event.y_root-self.drag_xy[1]:+d}")
-    def drag_end(self, _event): self.drag_xy = None; self.app.save_settings()
+    def drag_end(self, _event):
+        self.drag_xy = None
+        # A manual move pins the overlays until the target button is re-enabled.
+        if self.app.auto_follow: self.app.set_follow(False)
+        self.app.save_settings()
     def state(self): return {"x": self.root.winfo_x(), "y": self.root.winfo_y()}
 
 
@@ -242,11 +296,15 @@ class OverlayApp:
         self.caps_lock = bool(user32.GetKeyState(20) & 1)
         self.hook, self.windows = None, []
         settings = self.load_settings(); saved_windows = settings.get("windows", [])
-        for i, monitor in enumerate(displays()):
+        self.auto_follow = settings.get("auto_follow", True)
+        self.mouse_was_down, self.last_caret = False, None
+        self.monitor_areas = displays()
+        for i, monitor in enumerate(self.monitor_areas):
             window = tk.Toplevel(self.root)
             saved = saved_windows[i] if i < len(saved_windows) else {}
             self.windows.append(LiveWindow(self, window, monitor, i, saved))
         self.install_hook(); self.root.after(15, self.drain_events)
+        self.root.after(100, self.watch_typing_focus)
 
     def apply_icon(self, window):
         try:
@@ -272,7 +330,52 @@ class OverlayApp:
 
     def save_settings(self):
         APP_DIR.mkdir(parents=True, exist_ok=True)
-        SETTINGS.write_text(json.dumps({"windows": [w.state() for w in self.windows]}), encoding="utf-8")
+        SETTINGS.write_text(json.dumps({"windows": [w.state() for w in self.windows],
+                                        "auto_follow": self.auto_follow}), encoding="utf-8")
+
+    def set_follow(self, enabled):
+        self.auto_follow = enabled
+        for window in self.windows: window.update_follow_button()
+        self.save_settings()
+        if enabled: self.snap_to_caret(force=True)
+
+    def toggle_follow(self): self.set_follow(not self.auto_follow)
+
+    def caret_position(self):
+        """Return the focused application's caret in screen coordinates."""
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd: return None
+        pid = wintypes.DWORD()
+        thread = user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if pid.value == os.getpid(): return None
+        info = GUITHREADINFO(); info.cbSize = ctypes.sizeof(info)
+        if not user32.GetGUIThreadInfo(thread, ctypes.byref(info)) or not info.hwndCaret:
+            return None
+        point = POINT(info.rcCaret.left, info.rcCaret.bottom)
+        if not user32.ClientToScreen(info.hwndCaret, ctypes.byref(point)): return None
+        return point.x, point.y, int(info.hwndFocus or info.hwndCaret)
+
+    def snap_to_caret(self, force=False):
+        if not self.auto_follow: return
+        caret = self.caret_position()
+        if not caret: return
+        x, y, hwnd = caret
+        signature = (hwnd, y)
+        if not force and signature == self.last_caret: return
+        self.last_caret = signature
+        for window in self.windows:
+            l, t, r, b = window.monitor
+            if l <= x < r and t <= y < b:
+                window.snap_near(x, y); self.save_settings(); break
+
+    def watch_typing_focus(self):
+        """Snap after a text-field click or a meaningful caret/focus change."""
+        down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
+        if self.mouse_was_down and not down:
+            self.root.after(120, lambda: self.snap_to_caret(force=True))
+        self.mouse_was_down = down
+        self.snap_to_caret()
+        self.root.after(100, self.watch_typing_focus)
 
     def install_hook(self):
         @HOOKPROC
