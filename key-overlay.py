@@ -34,7 +34,8 @@ def resource_path(name):
 
 
 user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
-WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP = 13, 0x100, 0x101, 0x104, 0x105
+WH_KEYBOARD_LL, WH_MOUSE_LL = 13, 14
+WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_LBUTTONUP = 0x100, 0x101, 0x104, 0x105, 0x0202
 VK_NAMES = {8:"BACKSPACE", 9:"TAB", 13:"ENTER", 16:"SHIFT", 17:"CTRL", 18:"ALT", 20:"CAPS", 27:"ESC", 32:"SPACE",
             33:"PG UP", 34:"PG DN", 35:"END", 36:"HOME", 37:"←", 38:"↑", 39:"→", 40:"↓", 45:"INSERT", 46:"DELETE",
             160:"SHIFT", 161:"SHIFT", 162:"CTRL", 163:"CTRL", 164:"ALT", 165:"ALT", 188:",", 190:"."}
@@ -42,16 +43,20 @@ for n in range(1, 13): VK_NAMES[111+n] = f"F{n}"
 
 GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = -20, 0x00000080, 0x00040000
 
+class POINT(ctypes.Structure):
+    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
 class KBDLLHOOKSTRUCT(ctypes.Structure):
     _fields_ = [("vkCode", wintypes.DWORD), ("scanCode", wintypes.DWORD), ("flags", wintypes.DWORD),
+                ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+
+class MSLLHOOKSTRUCT(ctypes.Structure):
+    _fields_ = [("pt", POINT), ("mouseData", wintypes.DWORD), ("flags", wintypes.DWORD),
                 ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
 
 class MONITORINFO(ctypes.Structure):
     _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
                 ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
-
-class POINT(ctypes.Structure):
-    _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
 
 class GUITHREADINFO(ctypes.Structure):
     _fields_ = [("cbSize", wintypes.DWORD), ("flags", wintypes.DWORD),
@@ -62,9 +67,11 @@ class GUITHREADINFO(ctypes.Structure):
 
 LRESULT, HHOOK = ctypes.c_ssize_t, wintypes.HANDLE
 HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+MOUSEPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 MONITORENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
                                     ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
-user32.SetWindowsHookExW.argtypes = (ctypes.c_int, HOOKPROC, wintypes.HINSTANCE, wintypes.DWORD)
+# Do not constrain the callback type here: keyboard and mouse hooks use
+# different ctypes callback classes but share the same Windows API.
 user32.SetWindowsHookExW.restype = HHOOK
 user32.CallNextHookEx.argtypes = (HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 user32.CallNextHookEx.restype = LRESULT
@@ -335,10 +342,11 @@ class OverlayApp:
         self.icon_image = None
         self.apply_icon(self.root)
         self.events: queue.Queue[tuple[str, bool]] = queue.Queue()
+        self.clicks: queue.Queue[tuple[int, int]] = queue.Queue()
         self.history, self.typed_text, self.held = [], "", set()
         self.clear_text_job = None
         self.caps_lock = bool(user32.GetKeyState(20) & 1)
-        self.hook, self.windows = None, []
+        self.hook, self.mouse_hook, self.windows = None, None, []
         settings = self.load_settings(); saved_windows = settings.get("windows", [])
         self.auto_follow = settings.get("auto_follow", True)
         self.opacity = float(settings.get("opacity", 0.82))
@@ -348,8 +356,8 @@ class OverlayApp:
         saved = settings.get("window", saved_windows[0] if saved_windows else {})
         monitor = self.monitor_for_point(int(saved.get("x", 0)), int(saved.get("y", 0)))
         self.windows.append(LiveWindow(self, tk.Toplevel(self.root), monitor, 0, saved))
-        self.install_hook(); self.root.after(15, self.drain_events)
-        self.root.after(100, self.watch_typing_focus)
+        self.install_hooks(); self.root.after(15, self.drain_events)
+        self.root.after(15, self.drain_clicks)
 
     def apply_icon(self, window):
         try:
@@ -456,21 +464,41 @@ class OverlayApp:
         self.mouse_was_down = down
         self.root.after(60, self.watch_typing_focus)
 
-    def install_hook(self):
+    def install_hooks(self):
         @HOOKPROC
-        def callback(code, msg, data):
+        def keyboard_callback(code, msg, data):
             if code >= 0 and msg in (WM_KEYDOWN, WM_SYSKEYDOWN, WM_KEYUP, WM_SYSKEYUP):
                 vk = ctypes.cast(data, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents.vkCode
                 self.events.put((self.vk_label(vk), msg in (WM_KEYDOWN, WM_SYSKEYDOWN)))
             return user32.CallNextHookEx(self.hook, code, msg, data)
-        self.callback = callback
-        self.hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, callback, kernel32.GetModuleHandleW(None), 0)
-        if not self.hook: raise ctypes.WinError()
+        @MOUSEPROC
+        def mouse_callback(code, msg, data):
+            if code >= 0 and msg == WM_LBUTTONUP:
+                point = ctypes.cast(data, ctypes.POINTER(MSLLHOOKSTRUCT)).contents.pt
+                self.clicks.put((point.x, point.y))
+            return user32.CallNextHookEx(self.mouse_hook, code, msg, data)
+        self.callback, self.mouse_callback = keyboard_callback, mouse_callback
+        module = kernel32.GetModuleHandleW(None)
+        self.hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_callback, module, 0)
+        self.mouse_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, mouse_callback, module, 0)
+        if not self.hook or not self.mouse_hook: raise ctypes.WinError()
 
     @staticmethod
     def vk_label(vk):
         if 65 <= vk <= 90 or 48 <= vk <= 57: return chr(vk)
         return VK_NAMES.get(vk, f"VK {vk}")
+
+    def drain_clicks(self):
+        try:
+            while True:
+                x, y = self.clicks.get_nowait()
+                point = POINT(x, y); clicked = user32.WindowFromPoint(point)
+                pid = wintypes.DWORD()
+                if clicked: user32.GetWindowThreadProcessId(clicked, ctypes.byref(pid))
+                if pid.value != os.getpid() and self.auto_follow:
+                    self.windows[0].snap_near(x, y); self.save_settings()
+        except queue.Empty: pass
+        self.root.after(15, self.drain_clicks)
 
     def clear_typed_text(self):
         self.typed_text = ""
@@ -521,6 +549,7 @@ class OverlayApp:
     def close(self):
         self.save_settings()
         if self.hook: user32.UnhookWindowsHookEx(self.hook)
+        if self.mouse_hook: user32.UnhookWindowsHookEx(self.mouse_hook)
         if self.mutex: kernel32.CloseHandle(self.mutex); self.mutex = None
         self.root.destroy()
 

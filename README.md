@@ -12,13 +12,26 @@ python -m http.server 8765
 
 Then visit `http://localhost:8765`.
 
-## Standalone live-key overlay (Windows)
+## Standalone live-key overlay
 
-### Ready-to-run EXE
+### macOS
+
+Download `RightHandQuestMacOverlay-macOS.zip` from the latest release, unzip it, and move the app to **Applications**. On first launch:
+
+1. Control-click the app and choose **Open** (the community build is not Apple-notarized).
+2. Allow the app in **System Settings → Privacy & Security → Accessibility**.
+3. Allow it in **Privacy & Security → Input Monitoring**.
+4. Quit and reopen the app after granting permissions.
+
+The macOS version provides the same live layout, Shift highlighting, click-following overlay, typed preview, transparency control, and **▶** training-game launcher. To run from source, make `Start Key Overlay macOS.command` executable (`chmod +x`) and open it. Build a `.app` locally with `./build-macos.sh`.
+
+### Windows
+
+#### Ready-to-run EXE
 
 Download **RightHandQuestOverlay.exe** from the repository's latest GitHub release and double-click it. It is a portable application and does not require Python or installation. Windows may show a SmartScreen warning because the file is not code-signed; use **More info → Run anyway** if you trust the download.
 
-### Run from source
+#### Run from source
 
 Double-click **Start Key Overlay.bat**. The overlay:
 
@@ -40,6 +53,6 @@ Double-click **Start Key Overlay.bat**. The overlay:
 
 No installation or third-party Python packages are required when running from source. Windows may prevent global key monitoring over elevated/administrator applications unless the overlay is also started with equivalent privileges.
 
-### Build the EXE
+#### Build the EXE
 
 Double-click **build-exe.bat**. The resulting portable executable will be written to `dist/RightHandQuestOverlay.exe`. The script installs PyInstaller if it is unavailable.
