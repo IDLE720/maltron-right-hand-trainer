@@ -108,7 +108,7 @@ class LiveWindow:
     """A visual overlay on one monitor; keyboard state comes from OverlayApp."""
     def __init__(self, app, window, monitor, index, saved=None):
         self.app, self.root, self.monitor, self.index = app, window, monitor, index
-        self.keys, self.drag_xy, self.minimized = {}, None, False
+        self.keys, self.fade_jobs, self.drag_xy, self.minimized = {}, {}, None, False
         self.root.title(f"Right Hand Quest — Live Keys {index + 1}")
         self.root.configure(bg=COLORS["bg"]); self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", self.app.opacity)
@@ -251,6 +251,34 @@ class LiveWindow:
         # Always start visible. Minimized state is intentionally not restored,
         # so relaunching can never appear to do nothing.
 
+    @staticmethod
+    def blend_color(start, end, amount):
+        """Blend two #RRGGBB colors by an amount from zero to one."""
+        a = tuple(int(start[i:i+2], 16) for i in (1, 3, 5))
+        b = tuple(int(end[i:i+2], 16) for i in (1, 3, 5))
+        mixed = tuple(round(x + (y - x) * amount) for x, y in zip(a, b))
+        return "#" + "".join(f"{value:02x}" for value in mixed)
+
+    def fade_key(self, label):
+        key = self.keys.get(label)
+        if not key: return
+        resting = "#365746" if label in HOME or label == "SPACE" else COLORS["key"]
+        old_job = self.fade_jobs.pop(label, None)
+        if old_job:
+            try: self.root.after_cancel(old_job)
+            except Exception: pass
+        steps, duration = 12, 1100
+        def step(number=1):
+            amount = number / steps
+            key.config(bg=self.blend_color(COLORS["lime"], resting, amount),
+                       fg=self.blend_color(COLORS["ink"], COLORS["text"], amount))
+            if number < steps:
+                self.fade_jobs[label] = self.root.after(duration // steps, step, number + 1)
+            else:
+                self.fade_jobs.pop(label, None)
+        # Hold the highlight briefly, then fade it smoothly.
+        self.fade_jobs[label] = self.root.after(260, step)
+
     def show_key(self, label, down, history, typed_text):
         if down:
             self.current.config(text=label); self.history_label.config(text=" · ".join(history))
@@ -261,9 +289,14 @@ class LiveWindow:
             self.typed_preview.config(state="disabled")
         key = self.keys.get(label)
         if key:
-            resting = "#365746" if label in HOME or label == "SPACE" else COLORS["key"]
-            key.config(bg=COLORS["lime"] if down else resting,
-                       fg=COLORS["ink"] if down else COLORS["text"])
+            if down:
+                old_job = self.fade_jobs.pop(label, None)
+                if old_job:
+                    try: self.root.after_cancel(old_job)
+                    except Exception: pass
+                key.config(bg=COLORS["lime"], fg=COLORS["ink"])
+            else:
+                self.fade_key(label)
 
     def toggle_minimize(self, save=True):
         self.minimized = not self.minimized
