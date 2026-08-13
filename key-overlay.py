@@ -324,8 +324,6 @@ class LiveWindow:
         if self.drag_xy: self.root.geometry(f"{event.x_root-self.drag_xy[0]:+d}{event.y_root-self.drag_xy[1]:+d}")
     def drag_end(self, _event):
         self.drag_xy = None
-        # A manual move pins the overlays until the target button is re-enabled.
-        if self.app.auto_follow: self.app.set_follow(False)
         self.app.save_settings()
     def state(self): return {"x": self.root.winfo_x(), "y": self.root.winfo_y()}
 
@@ -348,7 +346,9 @@ class OverlayApp:
         self.caps_lock = bool(user32.GetKeyState(20) & 1)
         self.hook, self.mouse_hook, self.windows = None, None, []
         settings = self.load_settings(); saved_windows = settings.get("windows", [])
-        self.auto_follow = settings.get("auto_follow", True)
+        # Click-following is enabled on every launch. Older versions could save
+        # it as disabled after a drag, which made the overlay appear broken.
+        self.auto_follow = True
         self.opacity = float(settings.get("opacity", 0.82))
         self.opacity = max(0.55, min(1.0, self.opacity))
         self.mouse_was_down, self.last_caret = False, None
@@ -358,6 +358,9 @@ class OverlayApp:
         self.windows.append(LiveWindow(self, tk.Toplevel(self.root), monitor, 0, saved))
         self.install_hooks(); self.root.after(15, self.drain_events)
         self.root.after(15, self.drain_clicks)
+        # Fast polling is a fallback for Windows configurations that suppress
+        # low-level mouse-hook events from unsigned applications.
+        self.root.after(10, self.watch_typing_focus)
 
     def apply_icon(self, window):
         try:
@@ -441,11 +444,7 @@ class OverlayApp:
         return True
 
     def snap_to_click(self):
-        """Move the single overlay after an external mouse click.
-
-        Native text controls supply an exact caret location. Browser/electron apps
-        often do not, so the pointer location is used as a reliable fallback.
-        """
+        """Move the single overlay beside the latest external click."""
         if not self.auto_follow: return
         point = POINT()
         if not user32.GetCursorPos(ctypes.byref(point)): return
@@ -453,16 +452,14 @@ class OverlayApp:
         pid = wintypes.DWORD()
         if clicked: user32.GetWindowThreadProcessId(clicked, ctypes.byref(pid))
         if pid.value == os.getpid(): return
-        if not self.snap_to_caret(force=True):
-            self.windows[0].snap_near(point.x, point.y); self.save_settings()
+        self.windows[0].snap_near(point.x, point.y); self.save_settings()
 
     def watch_typing_focus(self):
-        """Reposition the single overlay whenever an external click completes."""
+        """Reliable polling fallback for quick external mouse clicks."""
         down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
-        if self.mouse_was_down and not down:
-            self.root.after(120, self.snap_to_click)
+        if self.mouse_was_down and not down: self.snap_to_click()
         self.mouse_was_down = down
-        self.root.after(60, self.watch_typing_focus)
+        self.root.after(10, self.watch_typing_focus)
 
     def install_hooks(self):
         @HOOKPROC

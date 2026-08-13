@@ -21,7 +21,7 @@ def load_settings():
 
 class MacOverlay:
     def __init__(self):
-        self.settings=load_settings(); self.opacity=float(self.settings.get("opacity",.82)); self.follow=self.settings.get("follow",True)
+        self.settings=load_settings(); self.opacity=float(self.settings.get("opacity",.82)); self.follow=True
         self.events=queue.Queue(); self.keys={}; self.fade_jobs={}; self.history=[]; self.text=""; self.held=set(); self.clear_job=None
         self.root=tk.Tk(); self.root.title("Right Hand Quest — Live Keys"); self.root.configure(bg=COLORS["bg"])
         self.root.attributes("-topmost",True,"-alpha",self.opacity); self.root.resizable(False,False)
@@ -61,7 +61,7 @@ class MacOverlay:
         self.root.update_idletasks();x=int(self.settings.get("x",self.root.winfo_screenwidth()-self.root.winfo_reqwidth()-20));y=int(self.settings.get("y",self.root.winfo_screenheight()-self.root.winfo_reqheight()-60));self.root.geometry(f"+{max(0,x)}+{max(0,y)}")
     def save(self):
         APP_DIR.mkdir(parents=True,exist_ok=True);SETTINGS.write_text(json.dumps({"x":self.root.winfo_x(),"y":self.root.winfo_y(),"opacity":self.opacity,"follow":self.follow}))
-    def drag_start(self,e):self.drag=(e.x_root-self.root.winfo_x(),e.y_root-self.root.winfo_y());self.follow=False;self.update_follow()
+    def drag_start(self,e):self.drag=(e.x_root-self.root.winfo_x(),e.y_root-self.root.winfo_y())
     def drag_move(self,e):self.root.geometry(f"+{e.x_root-self.drag[0]}+{e.y_root-self.drag[1]}")
     def minimize(self):self.root.iconify()
     def toggle_follow(self):self.follow=not self.follow;self.update_follow();self.save()
