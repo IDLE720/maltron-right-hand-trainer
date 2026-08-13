@@ -22,6 +22,7 @@ Double-click **Start Key Overlay.bat**. The overlay:
 
 - creates a synchronized, always-on-top overlay on every connected display;
 - provides a taskbar icon that restores and raises the overlays if one disappears behind another window;
+- prevents duplicate background copies—opening the EXE again restores the running overlays;
 - observes keys system-wide without blocking them;
 - highlights Maltron letter and Space keys;
 - shows a recent, in-memory preview above the layout and clears it after one minute without typing;

@@ -60,6 +60,13 @@ user32.CallNextHookEx.restype = LRESULT
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,); user32.UnhookWindowsHookEx.restype = wintypes.BOOL
 user32.GetMonitorInfoW.argtypes = (wintypes.HMONITOR, ctypes.POINTER(MONITORINFO))
 kernel32.GetModuleHandleW.argtypes = (wintypes.LPCWSTR,); kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR)
+kernel32.CreateMutexW.restype = wintypes.HANDLE
+kernel32.GetLastError.restype = wintypes.DWORD
+kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+ERROR_ALREADY_EXISTS, SW_RESTORE, HWND_TOPMOST = 183, 9, -1
+SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW = 0x0002, 0x0001, 0x0040
+ENUMWINDOWSPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
 def displays():
@@ -188,7 +195,8 @@ class LiveWindow:
             if not (l <= x < r and t <= y < b): x, y = r-w-18, b-h-18
         else: x, y = r-w-18, b-h-18
         self.root.geometry(f"{x:+d}{y:+d}")
-        if saved.get("minimized"): self.toggle_minimize(save=False)
+        # Always start visible. Minimized state is intentionally not restored,
+        # so relaunching can never appear to do nothing.
 
     def show_key(self, label, down, history, typed_text):
         if down:
@@ -214,11 +222,12 @@ class LiveWindow:
     def drag_move(self, event):
         if self.drag_xy: self.root.geometry(f"{event.x_root-self.drag_xy[0]:+d}{event.y_root-self.drag_xy[1]:+d}")
     def drag_end(self, _event): self.drag_xy = None; self.app.save_settings()
-    def state(self): return {"x": self.root.winfo_x(), "y": self.root.winfo_y(), "minimized": self.minimized}
+    def state(self): return {"x": self.root.winfo_x(), "y": self.root.winfo_y()}
 
 
 class OverlayApp:
-    def __init__(self):
+    def __init__(self, mutex=None):
+        self.mutex = mutex
         try: user32.SetProcessDPIAware()
         except Exception: pass
         try:
@@ -330,13 +339,41 @@ class OverlayApp:
     def close(self):
         self.save_settings()
         if self.hook: user32.UnhookWindowsHookEx(self.hook)
+        if self.mutex: kernel32.CloseHandle(self.mutex); self.mutex = None
         self.root.destroy()
 
     def run(self): self.root.mainloop()
 
 
+def restore_running_copy():
+    """Raise all windows from the existing instance when the EXE is opened again."""
+    found = []
+    @ENUMWINDOWSPROC
+    def visit(hwnd, _data):
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length:
+            title = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, title, length + 1)
+            if title.value.startswith("Right Hand Quest — Live Keys") or title.value.startswith("Right Hand Quest - Live Keys"):
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                     SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+                found.append(hwnd)
+        return True
+    user32.EnumWindows(visit, 0)
+    if not found:
+        user32.MessageBoxW(None, "Right Hand Quest is already running. Check its taskbar icon.",
+                           "Right Hand Quest", 0x40)
+
+
 if __name__ == "__main__":
-    try: OverlayApp().run()
-    except Exception as exc:
-        try: user32.MessageBoxW(None, f"The key overlay could not start.\n\n{exc}", "Right Hand Quest", 0x10)
-        finally: raise
+    mutex = kernel32.CreateMutexW(None, False, "Local\\RightHandQuestLiveKeys")
+    if kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        restore_running_copy()
+        if mutex: kernel32.CloseHandle(mutex)
+    else:
+        try: OverlayApp(mutex).run()
+        except Exception as exc:
+            if mutex: kernel32.CloseHandle(mutex)
+            try: user32.MessageBoxW(None, f"The key overlay could not start.\n\n{exc}", "Right Hand Quest", 0x10)
+            finally: raise
