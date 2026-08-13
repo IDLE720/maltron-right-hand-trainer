@@ -1,6 +1,6 @@
-"""Always-on-top Maltron right-hand live-key overlays for Windows.
+"""Always-on-top Maltron single right-hand live-key overlay for Windows.
 
-One synchronized overlay is created on every connected display. Uses only Python's
+One overlay follows mouse clicks between connected displays. Uses only Python's
 standard library and observes keys system-wide without blocking or changing them.
 """
 from __future__ import annotations
@@ -10,6 +10,7 @@ import json
 import os
 import queue
 import sys
+import webbrowser
 import tkinter as tk
 from ctypes import wintypes
 from pathlib import Path
@@ -36,7 +37,7 @@ user32, kernel32 = ctypes.windll.user32, ctypes.windll.kernel32
 WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP = 13, 0x100, 0x101, 0x104, 0x105
 VK_NAMES = {8:"BACKSPACE", 9:"TAB", 13:"ENTER", 16:"SHIFT", 17:"CTRL", 18:"ALT", 20:"CAPS", 27:"ESC", 32:"SPACE",
             33:"PG UP", 34:"PG DN", 35:"END", 36:"HOME", 37:"←", 38:"↑", 39:"→", 40:"↓", 45:"INSERT", 46:"DELETE",
-            188:",", 190:"."}
+            160:"SHIFT", 161:"SHIFT", 162:"CTRL", 163:"CTRL", 164:"ALT", 165:"ALT", 188:",", 190:"."}
 for n in range(1, 13): VK_NAMES[111+n] = f"F{n}"
 
 GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW = -20, 0x00000080, 0x00040000
@@ -76,6 +77,10 @@ user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintyp
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 user32.GetAsyncKeyState.argtypes = (ctypes.c_int,)
 user32.GetAsyncKeyState.restype = ctypes.c_short
+user32.GetCursorPos.argtypes = (ctypes.POINTER(POINT),)
+user32.GetCursorPos.restype = wintypes.BOOL
+user32.WindowFromPoint.argtypes = (POINT,)
+user32.WindowFromPoint.restype = wintypes.HWND
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetParent.argtypes = (wintypes.HWND,); user32.GetParent.restype = wintypes.HWND
 user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
@@ -129,12 +134,13 @@ class LiveWindow:
         live.pack(side="left", padx=(12, 5))
         tk.Label(self.header, text="LIVE KEYS", fg=COLORS["text"], bg=COLORS["bg"],
                  font=("Consolas", 9, "bold")).pack(side="left")
-        tk.Label(self.header, text=f"  display {self.index + 1}", fg=COLORS["muted"],
+        tk.Label(self.header, text="  follows clicks", fg=COLORS["muted"],
                  bg=COLORS["bg"], font=("Consolas", 7)).pack(side="left")
         self.header_button("×", self.app.close)
         self.min_btn = self.header_button("−", self.toggle_minimize)
         self.opacity_btn = self.header_button(f"{round(self.app.opacity * 100)}%", self.app.cycle_opacity)
         self.opacity_btn.config(width=5)
+        self.game_btn = self.header_button("▶", self.app.open_training_game)
         self.follow_btn = self.header_button("⌖", self.app.toggle_follow)
         self.update_follow_button()
         for widget in (self.header, live):
@@ -182,7 +188,7 @@ class LiveWindow:
         space = self.make_key(thumb_board, "SPACE", 4, 3, "thumb", True, width=8)
         space.grid(row=4, column=3, rowspan=2, sticky="nsew", padx=2, pady=2)
         self.make_key(thumb_board, ",", 5, 1, "thumb"); self.make_key(thumb_board, ".", 5, 2, "thumb")
-        tk.Label(self.body, text="One synchronized overlay on every display",
+        tk.Label(self.body, text="▶ opens training • ⌖ follows clicks",
                  fg=COLORS["muted"], bg=COLORS["panel"], font=("Consolas", 7)).pack(pady=(8, 0))
 
     def update_follow_button(self):
@@ -191,7 +197,8 @@ class LiveWindow:
                                text="⌖" if active else "○")
 
     def snap_near(self, x, y):
-        """Restore and place this overlay near, but not over, the active caret."""
+        """Restore and place this overlay near, but not over, the click/caret."""
+        self.monitor = self.app.monitor_for_point(x, y)
         self.root.update_idletasks()
         w, h = self.root.winfo_width(), self.root.winfo_height()
         l, t, r, b = self.monitor
@@ -338,10 +345,9 @@ class OverlayApp:
         self.opacity = max(0.55, min(1.0, self.opacity))
         self.mouse_was_down, self.last_caret = False, None
         self.monitor_areas = displays()
-        for i, monitor in enumerate(self.monitor_areas):
-            window = tk.Toplevel(self.root)
-            saved = saved_windows[i] if i < len(saved_windows) else {}
-            self.windows.append(LiveWindow(self, window, monitor, i, saved))
+        saved = settings.get("window", saved_windows[0] if saved_windows else {})
+        monitor = self.monitor_for_point(int(saved.get("x", 0)), int(saved.get("y", 0)))
+        self.windows.append(LiveWindow(self, tk.Toplevel(self.root), monitor, 0, saved))
         self.install_hook(); self.root.after(15, self.drain_events)
         self.root.after(100, self.watch_typing_focus)
 
@@ -354,7 +360,7 @@ class OverlayApp:
             pass
 
     def restore_all(self):
-        """Bring every overlay back when the taskbar button is selected."""
+        """Bring the overlay back when the taskbar button is selected."""
         for window in self.windows:
             window.root.deiconify()
             window.root.attributes("-topmost", True)
@@ -369,9 +375,19 @@ class OverlayApp:
 
     def save_settings(self):
         APP_DIR.mkdir(parents=True, exist_ok=True)
-        SETTINGS.write_text(json.dumps({"windows": [w.state() for w in self.windows],
+        SETTINGS.write_text(json.dumps({"window": self.windows[0].state() if self.windows else {},
                                         "auto_follow": self.auto_follow,
                                         "opacity": self.opacity}), encoding="utf-8")
+
+    def monitor_for_point(self, x, y):
+        for area in self.monitor_areas:
+            l, t, r, b = area
+            if l <= x < r and t <= y < b: return area
+        return self.monitor_areas[0]
+
+    @staticmethod
+    def open_training_game():
+        webbrowser.open("https://idle720.github.io/maltron-right-hand-trainer/", new=2)
 
     def cycle_opacity(self):
         """Cycle through translucent, lighter, and fully opaque modes."""
@@ -406,26 +422,39 @@ class OverlayApp:
         return point.x, point.y, int(info.hwndFocus or info.hwndCaret)
 
     def snap_to_caret(self, force=False):
-        if not self.auto_follow: return
+        if not self.auto_follow: return False
         caret = self.caret_position()
-        if not caret: return
+        if not caret: return False
         x, y, hwnd = caret
         signature = (hwnd, y)
-        if not force and signature == self.last_caret: return
+        if not force and signature == self.last_caret: return False
         self.last_caret = signature
-        for window in self.windows:
-            l, t, r, b = window.monitor
-            if l <= x < r and t <= y < b:
-                window.snap_near(x, y); self.save_settings(); break
+        self.windows[0].snap_near(x, y); self.save_settings()
+        return True
+
+    def snap_to_click(self):
+        """Move the single overlay after an external mouse click.
+
+        Native text controls supply an exact caret location. Browser/electron apps
+        often do not, so the pointer location is used as a reliable fallback.
+        """
+        if not self.auto_follow: return
+        point = POINT()
+        if not user32.GetCursorPos(ctypes.byref(point)): return
+        clicked = user32.WindowFromPoint(point)
+        pid = wintypes.DWORD()
+        if clicked: user32.GetWindowThreadProcessId(clicked, ctypes.byref(pid))
+        if pid.value == os.getpid(): return
+        if not self.snap_to_caret(force=True):
+            self.windows[0].snap_near(point.x, point.y); self.save_settings()
 
     def watch_typing_focus(self):
-        """Snap after a text-field click or a meaningful caret/focus change."""
+        """Reposition the single overlay whenever an external click completes."""
         down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
         if self.mouse_was_down and not down:
-            self.root.after(120, lambda: self.snap_to_caret(force=True))
+            self.root.after(120, self.snap_to_click)
         self.mouse_was_down = down
-        self.snap_to_caret()
-        self.root.after(100, self.watch_typing_focus)
+        self.root.after(60, self.watch_typing_focus)
 
     def install_hook(self):
         @HOOKPROC

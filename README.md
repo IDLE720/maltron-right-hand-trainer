@@ -22,8 +22,9 @@ Download **RightHandQuestOverlay.exe** from the repository's latest GitHub relea
 
 Double-click **Start Key Overlay.bat**. The overlay:
 
-- creates a synchronized, always-on-top overlay on every connected display;
-- automatically snaps the appropriate overlay beside the active typing caret without stealing focus;
+- uses one always-on-top overlay that follows mouse clicks between connected displays;
+- snaps beside the active typing caret when available, or beside the click as a fallback, without stealing focus;
+- opens the browser training game from the **▶** button;
 - uses a semi-transparent window so work beneath the keyboard remains visible;
 - provides an opacity button to cycle between **82%**, **65%**, and **100%**;
 - provides a target button to turn automatic following on or off (dragging an overlay pins it in place);
@@ -33,9 +34,9 @@ Double-click **Start Key Overlay.bat**. The overlay:
 - includes the Shift key beside U and highlights pressed Maltron keys before gradually fading the glow;
 - shows a recent, in-memory preview above the layout and clears it after one minute without typing;
 - displays other keys in the live readout;
-- lets each display's overlay be dragged or minimized independently;
-- closes all overlays with **×**; and
-- remembers each overlay's position.
+- can be dragged to pin it in place or minimized;
+- closes with **×**; and
+- remembers its position.
 
 No installation or third-party Python packages are required when running from source. Windows may prevent global key monitoring over elevated/administrator applications unless the overlay is also started with equivalent privileges.
 
