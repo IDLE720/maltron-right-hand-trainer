@@ -28,7 +28,7 @@ Double-click **Start Key Overlay.bat**. The overlay:
 - provides a taskbar icon that restores and raises the overlays if one disappears behind another window;
 - prevents duplicate background copies—opening the EXE again restores the running overlays;
 - observes keys system-wide without blocking them;
-- highlights pressed Maltron keys, holds the glow briefly, and gradually fades it out;
+- includes the Shift key beside U and highlights pressed Maltron keys before gradually fading the glow;
 - shows a recent, in-memory preview above the layout and clears it after one minute without typing;
 - displays other keys in the live readout;
 - lets each display's overlay be dragged or minimized independently;

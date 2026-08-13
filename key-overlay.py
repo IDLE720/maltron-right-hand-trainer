@@ -177,6 +177,7 @@ class LiveWindow:
         self.make_key(thumb_board, "BACKSPACE", 2, 3, "thumb", width=8)
         self.make_key(thumb_board, "ENTER", 3, 2, "thumb", width=7)
         self.make_key(thumb_board, "I", 3, 3, "thumb")
+        self.make_key(thumb_board, "SHIFT", 4, 1, "thumb", width=7)
         self.make_key(thumb_board, "U", 4, 2, "thumb")
         space = self.make_key(thumb_board, "SPACE", 4, 3, "thumb", True, width=8)
         space.grid(row=4, column=3, rowspan=2, sticky="nsew", padx=2, pady=2)
