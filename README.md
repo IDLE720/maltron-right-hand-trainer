@@ -2,6 +2,8 @@
 
 ## Browser game
 
+The trainer procedurally generates a fresh exercise for every round. Later rounds adapt by weighting words containing keys missed earlier in the mission. Use **New sequence** at any time to generate another exercise.
+
 From this folder, run:
 
 ```text
