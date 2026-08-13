@@ -70,8 +70,10 @@ HOOKPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.L
 MOUSEPROC = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 MONITORENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
                                     ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
-# Do not constrain the callback type here: keyboard and mouse hooks use
-# different ctypes callback classes but share the same Windows API.
+# Both hook callback types are function pointers. Declaring the callback as
+# void* keeps the API 64-bit safe while accepting keyboard and mouse hooks.
+user32.SetWindowsHookExW.argtypes = (ctypes.c_int, ctypes.c_void_p,
+                                     wintypes.HINSTANCE, wintypes.DWORD)
 user32.SetWindowsHookExW.restype = HHOOK
 user32.CallNextHookEx.argtypes = (HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
 user32.CallNextHookEx.restype = LRESULT
@@ -98,7 +100,8 @@ kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWS
 kernel32.CreateMutexW.restype = wintypes.HANDLE
 kernel32.GetLastError.restype = wintypes.DWORD
 kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-ERROR_ALREADY_EXISTS, SW_RESTORE, HWND_TOPMOST = 183, 9, -1
+ERROR_ALREADY_EXISTS, SW_RESTORE = 183, 9
+HWND_TOPMOST = wintypes.HWND(-1)
 SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0002, 0x0001, 0x0010, 0x0040
 ENUMWINDOWSPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -476,8 +479,10 @@ class OverlayApp:
             return user32.CallNextHookEx(self.mouse_hook, code, msg, data)
         self.callback, self.mouse_callback = keyboard_callback, mouse_callback
         module = kernel32.GetModuleHandleW(None)
-        self.hook = user32.SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_callback, module, 0)
-        self.mouse_hook = user32.SetWindowsHookExW(WH_MOUSE_LL, mouse_callback, module, 0)
+        self.hook = user32.SetWindowsHookExW(
+            WH_KEYBOARD_LL, ctypes.cast(keyboard_callback, ctypes.c_void_p), module, 0)
+        self.mouse_hook = user32.SetWindowsHookExW(
+            WH_MOUSE_LL, ctypes.cast(mouse_callback, ctypes.c_void_p), module, 0)
         if not self.hook or not self.mouse_hook: raise ctypes.WinError()
 
     @staticmethod
