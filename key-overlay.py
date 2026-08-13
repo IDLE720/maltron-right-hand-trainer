@@ -111,6 +111,7 @@ class LiveWindow:
         self.keys, self.drag_xy, self.minimized = {}, None, False
         self.root.title(f"Right Hand Quest — Live Keys {index + 1}")
         self.root.configure(bg=COLORS["bg"]); self.root.attributes("-topmost", True)
+        self.root.attributes("-alpha", self.app.opacity)
         self.app.apply_icon(self.root)
         self.root.overrideredirect(True); self.root.resizable(False, False)
         self.build(); self.place(saved or {})
@@ -132,6 +133,8 @@ class LiveWindow:
                  bg=COLORS["bg"], font=("Consolas", 7)).pack(side="left")
         self.header_button("×", self.app.close)
         self.min_btn = self.header_button("−", self.toggle_minimize)
+        self.opacity_btn = self.header_button(f"{round(self.app.opacity * 100)}%", self.app.cycle_opacity)
+        self.opacity_btn.config(width=5)
         self.follow_btn = self.header_button("⌖", self.app.toggle_follow)
         self.update_follow_button()
         for widget in (self.header, live):
@@ -297,6 +300,8 @@ class OverlayApp:
         self.hook, self.windows = None, []
         settings = self.load_settings(); saved_windows = settings.get("windows", [])
         self.auto_follow = settings.get("auto_follow", True)
+        self.opacity = float(settings.get("opacity", 0.82))
+        self.opacity = max(0.55, min(1.0, self.opacity))
         self.mouse_was_down, self.last_caret = False, None
         self.monitor_areas = displays()
         for i, monitor in enumerate(self.monitor_areas):
@@ -331,7 +336,18 @@ class OverlayApp:
     def save_settings(self):
         APP_DIR.mkdir(parents=True, exist_ok=True)
         SETTINGS.write_text(json.dumps({"windows": [w.state() for w in self.windows],
-                                        "auto_follow": self.auto_follow}), encoding="utf-8")
+                                        "auto_follow": self.auto_follow,
+                                        "opacity": self.opacity}), encoding="utf-8")
+
+    def cycle_opacity(self):
+        """Cycle through translucent, lighter, and fully opaque modes."""
+        levels = (0.82, 0.65, 1.0)
+        current = min(range(len(levels)), key=lambda i: abs(levels[i] - self.opacity))
+        self.opacity = levels[(current + 1) % len(levels)]
+        for window in self.windows:
+            window.root.attributes("-alpha", self.opacity)
+            window.opacity_btn.config(text=f"{round(self.opacity * 100)}%", width=5)
+        self.save_settings()
 
     def set_follow(self, enabled):
         self.auto_follow = enabled

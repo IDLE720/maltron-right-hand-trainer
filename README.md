@@ -22,6 +22,8 @@ Double-click **Start Key Overlay.bat**. The overlay:
 
 - creates a synchronized, always-on-top overlay on every connected display;
 - automatically snaps the appropriate overlay beside the active typing caret without stealing focus;
+- uses a semi-transparent window so work beneath the keyboard remains visible;
+- provides an opacity button to cycle between **82%**, **65%**, and **100%**;
 - provides a target button to turn automatic following on or off (dragging an overlay pins it in place);
 - provides a taskbar icon that restores and raises the overlays if one disappears behind another window;
 - prevents duplicate background copies—opening the EXE again restores the running overlays;
