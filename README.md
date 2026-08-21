@@ -35,8 +35,8 @@ Download **RightHandQuestOverlay.exe** from the repository's latest GitHub relea
 
 Double-click **Start Key Overlay.bat**. The overlay:
 
-- uses one always-on-top overlay that follows mouse clicks between connected displays;
-- snaps beside the active typing caret when available, or beside the click as a fallback, without stealing focus;
+- uses one always-on-top overlay that follows where typing actually begins;
+- remembers clicks without moving, then snaps beside the active caret—or clicked text field—when a typing key confirms text entry;
 - opens the browser training game from the **▶** button;
 - uses a semi-transparent window so work beneath the keyboard remains visible;
 - provides an opacity button to cycle between **82%**, **65%**, and **100%**;

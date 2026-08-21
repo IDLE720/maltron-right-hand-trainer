@@ -23,6 +23,7 @@ class MacOverlay:
     def __init__(self):
         self.settings=load_settings(); self.opacity=float(self.settings.get("opacity",.82)); self.follow=True
         self.events=queue.Queue(); self.keys={}; self.fade_jobs={}; self.history=[]; self.text=""; self.held=set(); self.clear_job=None
+        self.last_click=None; self.last_typing_anchor=None
         self.root=tk.Tk(); self.root.title("Right Hand Quest — Live Keys"); self.root.configure(bg=COLORS["bg"])
         self.root.attributes("-topmost",True,"-alpha",self.opacity); self.root.resizable(False,False)
         try:self.icon=tk.PhotoImage(file=str(asset("right-hand-quest.png")));self.root.iconphoto(True,self.icon)
@@ -50,7 +51,7 @@ class MacOverlay:
         self.make_key(thumb,"BACKSPACE",2,3,"thumb",width=8);self.make_key(thumb,"ENTER",3,2,"thumb",width=7);self.make_key(thumb,"I",3,3,"thumb");self.make_key(thumb,"SHIFT",4,1,"thumb",width=7);self.make_key(thumb,"U",4,2,"thumb")
         space=self.make_key(thumb,"SPACE",4,3,"thumb",True,width=8);space.grid(row=4,column=3,rowspan=2,sticky="nsew",padx=2,pady=2)
         self.make_key(thumb,",",5,1,"thumb");self.make_key(thumb,".",5,2,"thumb")
-        tk.Label(self.body,text="▶ training • ⌖ follow clicks",fg=COLORS["muted"],bg=COLORS["panel"],font=("Menlo",7)).pack(pady=(8,0))
+        tk.Label(self.body,text="▶ training • ⌖ follow typing",fg=COLORS["muted"],bg=COLORS["panel"],font=("Menlo",7)).pack(pady=(8,0))
 
     def button(self,parent,text,cmd,width=3):
         b=tk.Button(parent,text=text,command=cmd,fg=COLORS["text"],bg=COLORS["bg"],activebackground=COLORS["edge"],bd=0,width=width);b.pack(side="right",fill="y");return b
@@ -81,17 +82,22 @@ class MacOverlay:
         try:
             while True:
                 event=self.events.get_nowait()
-                if event[0]=="click":self.follow_click(event[1],event[2])
+                if event[0]=="click":self.remember_click(event[1],event[2])
                 elif event[1]:self.key_event(event[1],event[2])
         except queue.Empty:pass
         self.root.after(15,self.drain)
-    def follow_click(self,x,y):
-        if not self.follow:return
-        # Ignore clicks inside the overlay itself.
+    def remember_click(self,x,y):
+        # A click becomes a candidate location; the overlay only moves once a
+        # real typing key confirms that text entry is happening there.
         if self.root.winfo_x()<=x<=self.root.winfo_x()+self.root.winfo_width() and self.root.winfo_y()<=y<=self.root.winfo_y()+self.root.winfo_height():return
+        self.last_click=(x,y);self.last_typing_anchor=None
+    def follow_typing(self):
+        if not self.follow or not self.last_click or self.last_click==self.last_typing_anchor:return
+        x,y=self.last_click;self.last_typing_anchor=self.last_click
         self.root.update_idletasks();w,h=self.root.winfo_width(),self.root.winfo_height();sw,sh=self.root.winfo_screenwidth(),self.root.winfo_screenheight();nx=x+20 if x+20+w<sw else x-w-20;ny=y+20 if y+20+h<sh else y-h-20;self.root.geometry(f"+{max(0,int(nx))}+{max(0,int(ny))}");self.root.lift();self.save()
     def key_event(self,label,down):
         if down:
+            if label not in ("SHIFT","CTRL","ALT","CAPS"):self.follow_typing()
             if label in ("SHIFT","CTRL","ALT"):self.held.add(label)
             self.current.config(text=label);self.history.append(label);self.history=self.history[-6:];self.history_label.config(text=" · ".join(self.history));self.update_text(label)
             if self.clear_job:self.root.after_cancel(self.clear_job)

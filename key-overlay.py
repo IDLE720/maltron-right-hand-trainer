@@ -91,6 +91,10 @@ user32.GetCursorPos.restype = wintypes.BOOL
 user32.WindowFromPoint.argtypes = (POINT,)
 user32.WindowFromPoint.restype = wintypes.HWND
 user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+user32.GetWindowRect.restype = wintypes.BOOL
+user32.GetAncestor.argtypes = (wintypes.HWND, wintypes.UINT)
+user32.GetAncestor.restype = wintypes.HWND
 user32.GetParent.argtypes = (wintypes.HWND,); user32.GetParent.restype = wintypes.HWND
 user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                 ctypes.c_int, ctypes.c_int, wintypes.UINT)
@@ -103,6 +107,7 @@ kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
 ERROR_ALREADY_EXISTS, SW_RESTORE = 183, 9
 HWND_TOPMOST = wintypes.HWND(-1)
 SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0002, 0x0001, 0x0010, 0x0040
+GA_ROOT = 2
 ENUMWINDOWSPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
@@ -144,7 +149,7 @@ class LiveWindow:
         live.pack(side="left", padx=(12, 5))
         tk.Label(self.header, text="LIVE KEYS", fg=COLORS["text"], bg=COLORS["bg"],
                  font=("Consolas", 9, "bold")).pack(side="left")
-        tk.Label(self.header, text="  follows clicks", fg=COLORS["muted"],
+        tk.Label(self.header, text="  follows typing", fg=COLORS["muted"],
                  bg=COLORS["bg"], font=("Consolas", 7)).pack(side="left")
         self.header_button("×", self.app.close)
         self.min_btn = self.header_button("−", self.toggle_minimize)
@@ -198,7 +203,7 @@ class LiveWindow:
         space = self.make_key(thumb_board, "SPACE", 4, 3, "thumb", True, width=8)
         space.grid(row=4, column=3, rowspan=2, sticky="nsew", padx=2, pady=2)
         self.make_key(thumb_board, ",", 5, 1, "thumb"); self.make_key(thumb_board, ".", 5, 2, "thumb")
-        tk.Label(self.body, text="▶ opens training • ⌖ follows clicks",
+        tk.Label(self.body, text="▶ opens training • ⌖ follows typing",
                  fg=COLORS["muted"], bg=COLORS["panel"], font=("Consolas", 7)).pack(pady=(8, 0))
 
     def update_follow_button(self):
@@ -355,6 +360,7 @@ class OverlayApp:
         self.opacity = float(settings.get("opacity", 0.82))
         self.opacity = max(0.55, min(1.0, self.opacity))
         self.mouse_was_down, self.last_caret = False, None
+        self.last_click, self.last_typing_window = None, None
         self.monitor_areas = displays()
         saved = settings.get("window", saved_windows[0] if saved_windows else {})
         monitor = self.monitor_for_point(int(saved.get("x", 0)), int(saved.get("y", 0)))
@@ -446,21 +452,47 @@ class OverlayApp:
         self.windows[0].snap_near(x, y); self.save_settings()
         return True
 
-    def snap_to_click(self):
-        """Move the single overlay beside the latest external click."""
-        if not self.auto_follow: return
+    def remember_click(self, x=None, y=None):
+        """Remember a possible typing location without moving until typing starts."""
         point = POINT()
-        if not user32.GetCursorPos(ctypes.byref(point)): return
+        if x is None:
+            if not user32.GetCursorPos(ctypes.byref(point)): return
+            x, y = point.x, point.y
+        else:
+            point.x, point.y = x, y
         clicked = user32.WindowFromPoint(point)
         pid = wintypes.DWORD()
         if clicked: user32.GetWindowThreadProcessId(clicked, ctypes.byref(pid))
         if pid.value == os.getpid(): return
-        self.windows[0].snap_near(point.x, point.y); self.save_settings()
+        root = user32.GetAncestor(clicked, GA_ROOT) if clicked else 0
+        self.last_click = (x, y, int(root or clicked or 0))
+        self.last_caret = None
+        self.last_typing_window = None
+
+    def follow_typing(self):
+        """Move beside the location receiving keystrokes, not every mouse click."""
+        if not self.auto_follow: return
+        # Native controls expose an exact caret. Only reposition when its line
+        # or focused control changes, avoiding horizontal jitter on every letter.
+        if self.snap_to_caret(): return
+        foreground = user32.GetForegroundWindow()
+        if not foreground: return
+        foreground_root = user32.GetAncestor(foreground, GA_ROOT) or foreground
+        if self.last_click and self.last_click[2] == int(foreground_root):
+            x, y, _ = self.last_click
+        else:
+            rect = wintypes.RECT()
+            if not user32.GetWindowRect(foreground_root, ctypes.byref(rect)): return
+            x, y = rect.right - 80, rect.bottom - 80
+        signature = (int(foreground_root), x, y)
+        if signature == self.last_typing_window: return
+        self.last_typing_window = signature
+        self.windows[0].snap_near(x, y); self.save_settings()
 
     def watch_typing_focus(self):
         """Reliable polling fallback for quick external mouse clicks."""
         down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)
-        if self.mouse_was_down and not down: self.snap_to_click()
+        if self.mouse_was_down and not down: self.remember_click()
         self.mouse_was_down = down
         self.root.after(10, self.watch_typing_focus)
 
@@ -497,8 +529,7 @@ class OverlayApp:
                 point = POINT(x, y); clicked = user32.WindowFromPoint(point)
                 pid = wintypes.DWORD()
                 if clicked: user32.GetWindowThreadProcessId(clicked, ctypes.byref(pid))
-                if pid.value != os.getpid() and self.auto_follow:
-                    self.windows[0].snap_near(x, y); self.save_settings()
+                if pid.value != os.getpid(): self.remember_click(x, y)
         except queue.Empty: pass
         self.root.after(15, self.drain_clicks)
 
@@ -535,6 +566,8 @@ class OverlayApp:
             while True:
                 label, down = self.events.get_nowait()
                 if down:
+                    if label not in ("SHIFT", "CTRL", "ALT", "CAPS"):
+                        self.root.after_idle(self.follow_typing)
                     if label == "CAPS" and label not in self.held: self.caps_lock = not self.caps_lock
                     if label in ("SHIFT", "CTRL", "ALT", "CAPS"): self.held.add(label)
                     self.update_typed_text(label)
