@@ -104,7 +104,7 @@ kernel32.CreateMutexW.argtypes = (ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWS
 kernel32.CreateMutexW.restype = wintypes.HANDLE
 kernel32.GetLastError.restype = wintypes.DWORD
 kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-ERROR_ALREADY_EXISTS, SW_RESTORE = 183, 9
+ERROR_ALREADY_EXISTS, SW_SHOWNOACTIVATE, SW_RESTORE = 183, 4, 9
 HWND_TOPMOST = wintypes.HWND(-1)
 SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE, SWP_SHOWWINDOW = 0x0002, 0x0001, 0x0010, 0x0040
 GA_ROOT = 2
@@ -129,6 +129,7 @@ class LiveWindow:
     def __init__(self, app, window, monitor, index, saved=None):
         self.app, self.root, self.monitor, self.index = app, window, monitor, index
         self.keys, self.fade_jobs, self.drag_xy, self.minimized = {}, {}, None, False
+        self.idle_hidden = False
         self.root.title(f"Right Hand Quest — Live Keys {index + 1}")
         self.root.configure(bg=COLORS["bg"]); self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", self.app.opacity)
@@ -211,9 +212,25 @@ class LiveWindow:
         self.follow_btn.config(fg=COLORS["lime"] if active else COLORS["muted"],
                                text="⌖" if active else "○")
 
+    def window_handle(self):
+        hwnd = self.root.winfo_id()
+        parent = user32.GetParent(hwnd)
+        return parent or hwnd
+
+    def show_for_typing(self):
+        """Reveal without activating or taking focus from the typing app."""
+        if not self.idle_hidden: return
+        self.idle_hidden = False
+        user32.ShowWindow(self.window_handle(), SW_SHOWNOACTIVATE)
+
+    def hide_for_idle(self):
+        self.idle_hidden = True
+        self.root.withdraw()
+
     def snap_near(self, x, y):
         """Restore and place this overlay near, but not over, the click/caret."""
         self.monitor = self.app.monitor_for_point(x, y)
+        self.show_for_typing()
         self.root.update_idletasks()
         w, h = self.root.winfo_width(), self.root.winfo_height()
         l, t, r, b = self.monitor
@@ -227,9 +244,7 @@ class LiveWindow:
         self.root.geometry(f"{target_x:+d}{target_y:+d}")
         self.root.update_idletasks()
         # Reposition without taking keyboard focus away from the text field.
-        hwnd = self.root.winfo_id()
-        parent = user32.GetParent(hwnd)
-        if parent: hwnd = parent
+        hwnd = self.window_handle()
         user32.SetWindowPos(hwnd, HWND_TOPMOST, target_x, target_y, w, h,
                             SWP_NOACTIVATE | SWP_SHOWWINDOW)
 
@@ -351,6 +366,7 @@ class OverlayApp:
         self.clicks: queue.Queue[tuple[int, int]] = queue.Queue()
         self.history, self.typed_text, self.held = [], "", set()
         self.clear_text_job = None
+        self.idle_hide_job = None
         self.caps_lock = bool(user32.GetKeyState(20) & 1)
         self.hook, self.mouse_hook, self.windows = None, None, []
         settings = self.load_settings(); saved_windows = settings.get("windows", [])
@@ -367,6 +383,7 @@ class OverlayApp:
         self.windows.append(LiveWindow(self, tk.Toplevel(self.root), monitor, 0, saved))
         self.install_hooks(); self.root.after(15, self.drain_events)
         self.root.after(15, self.drain_clicks)
+        self.schedule_idle_hide()
         # Fast polling is a fallback for Windows configurations that suppress
         # low-level mouse-hook events from unsigned applications.
         self.root.after(10, self.watch_typing_focus)
@@ -533,6 +550,16 @@ class OverlayApp:
         except queue.Empty: pass
         self.root.after(15, self.drain_clicks)
 
+    def hide_after_idle(self):
+        self.idle_hide_job = None
+        self.clear_typed_text()
+        for window in self.windows: window.hide_for_idle()
+
+    def schedule_idle_hide(self):
+        if self.idle_hide_job is not None:
+            self.root.after_cancel(self.idle_hide_job)
+        self.idle_hide_job = self.root.after(60_000, self.hide_after_idle)
+
     def clear_typed_text(self):
         self.typed_text = ""
         self.clear_text_job = None
@@ -566,6 +593,8 @@ class OverlayApp:
             while True:
                 label, down = self.events.get_nowait()
                 if down:
+                    for window in self.windows: window.show_for_typing()
+                    self.schedule_idle_hide()
                     if label not in ("SHIFT", "CTRL", "ALT", "CAPS"):
                         self.root.after_idle(self.follow_typing)
                     if label == "CAPS" and label not in self.held: self.caps_lock = not self.caps_lock

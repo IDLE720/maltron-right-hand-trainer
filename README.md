@@ -37,6 +37,7 @@ Double-click **Start Key Overlay.bat**. The overlay:
 
 - uses one always-on-top overlay that follows where typing actually begins;
 - remembers clicks without moving, then snaps beside the active caret—or clicked text field—when a typing key confirms text entry;
+- disappears after one minute without typing and automatically returns with the next keystroke;
 - opens the browser training game from the **▶** button;
 - uses a semi-transparent window so work beneath the keyboard remains visible;
 - provides an opacity button to cycle between **82%**, **65%**, and **100%**;

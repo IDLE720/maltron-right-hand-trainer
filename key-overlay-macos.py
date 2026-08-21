@@ -23,12 +23,12 @@ class MacOverlay:
     def __init__(self):
         self.settings=load_settings(); self.opacity=float(self.settings.get("opacity",.82)); self.follow=True
         self.events=queue.Queue(); self.keys={}; self.fade_jobs={}; self.history=[]; self.text=""; self.held=set(); self.clear_job=None
-        self.last_click=None; self.last_typing_anchor=None
+        self.last_click=None; self.last_typing_anchor=None; self.idle_job=None; self.idle_hidden=False
         self.root=tk.Tk(); self.root.title("Right Hand Quest — Live Keys"); self.root.configure(bg=COLORS["bg"])
         self.root.attributes("-topmost",True,"-alpha",self.opacity); self.root.resizable(False,False)
         try:self.icon=tk.PhotoImage(file=str(asset("right-hand-quest.png")));self.root.iconphoto(True,self.icon)
         except Exception:pass
-        self.build(); self.place(); self.start_listeners(); self.root.after(15,self.drain); self.root.protocol("WM_DELETE_WINDOW",self.close)
+        self.build(); self.place(); self.start_listeners(); self.root.after(15,self.drain); self.schedule_idle_hide(); self.root.protocol("WM_DELETE_WINDOW",self.close)
 
     def build(self):
         head=tk.Frame(self.root,bg=COLORS["bg"],height=40,cursor="fleur",highlightbackground=COLORS["edge"],highlightthickness=1);head.pack(fill="x");head.pack_propagate(False)
@@ -95,8 +95,17 @@ class MacOverlay:
         if not self.follow or not self.last_click or self.last_click==self.last_typing_anchor:return
         x,y=self.last_click;self.last_typing_anchor=self.last_click
         self.root.update_idletasks();w,h=self.root.winfo_width(),self.root.winfo_height();sw,sh=self.root.winfo_screenwidth(),self.root.winfo_screenheight();nx=x+20 if x+20+w<sw else x-w-20;ny=y+20 if y+20+h<sh else y-h-20;self.root.geometry(f"+{max(0,int(nx))}+{max(0,int(ny))}");self.root.lift();self.save()
+    def show_for_typing(self):
+        if self.idle_hidden:
+            self.idle_hidden=False;self.root.deiconify();self.root.attributes("-topmost",True);self.root.lift()
+    def schedule_idle_hide(self):
+        if self.idle_job:self.root.after_cancel(self.idle_job)
+        self.idle_job=self.root.after(60000,self.hide_after_idle)
+    def hide_after_idle(self):
+        self.idle_job=None;self.idle_hidden=True;self.clear_text();self.root.withdraw()
     def key_event(self,label,down):
         if down:
+            self.show_for_typing();self.schedule_idle_hide()
             if label not in ("SHIFT","CTRL","ALT","CAPS"):self.follow_typing()
             if label in ("SHIFT","CTRL","ALT"):self.held.add(label)
             self.current.config(text=label);self.history.append(label);self.history=self.history[-6:];self.history_label.config(text=" · ".join(self.history));self.update_text(label)
